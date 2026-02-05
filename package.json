@@ -1,0 +1,26 @@
+{
+  "name": "portfolio-backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
+    "axios": "^1.13.2",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "mongodb": "^7.0.0",
+    "mongoose": "^9.1.5",
+    "resend": "^6.9.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
+  },
+  "description": ""
+}
