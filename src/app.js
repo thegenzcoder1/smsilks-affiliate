@@ -48,6 +48,7 @@ const corsOptions = {
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
+  const secret_access_key = req.headers.secret_access_key;
 
   // ✅ Allow non-browser requests
   if (!origin) {
@@ -55,13 +56,13 @@ app.use((req, res, next) => {
   }
 
   const allowedOrigins = [
-    "http://localhost:5173",
+    // "http://localhost:5173",
     "https://kancheepuramsmsilks.net",
   ];
 
   const isAllowed =
     allowedOrigins.includes(origin) ||
-    origin.endsWith(".kancheepuramsmsilks.net");
+    origin.endsWith(".kancheepuramsmsilks.net") || (secret_access_key === process.env.POSTMAN_ACCESS_KEY);
 
   // ✅ ALWAYS set headers first
   res.setHeader("Access-Control-Allow-Origin", origin);
