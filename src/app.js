@@ -50,22 +50,29 @@ app.use((req, res, next) => {
   const origin = req.headers.origin;
   const secret_access_key = req.headers.secret_access_key;
 
-  // ✅ Allow non-browser requests
-  // if (!origin) {
-  //   return next();
-  // }
-
   const allowedOrigins = [
-    // "http://localhost:5173",
     "https://kancheepuramsmsilks.net",
   ];
 
   const isAllowed =
-    allowedOrigins.includes(origin) ||
-    origin.endsWith(".kancheepuramsmsilks.net") || (secret_access_key === process.env.POSTMAN_ACCESS_KEY);
+    // ✅ Allow server-to-server / curl / nginx
+    !origin ||
 
-  // ✅ ALWAYS set headers first
-  res.setHeader("Access-Control-Allow-Origin", origin);
+    // ✅ Exact allowed origins
+    allowedOrigins.includes(origin) ||
+
+    // ✅ Subdomains (ONLY if origin exists)
+    (typeof origin === "string" &&
+      origin.endsWith(".kancheepuramsmsilks.net")) ||
+
+    // ✅ Postman / internal access
+    secret_access_key === process.env.POSTMAN_ACCESS_KEY;
+
+  // ✅ Always set headers (safe even if origin undefined)
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader(
     "Access-Control-Allow-Methods",
@@ -73,15 +80,14 @@ app.use((req, res, next) => {
   );
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Authorization"
+    "Content-Type, Authorization, secret_access_key"
   );
 
-  // ✅ Handle preflight IMMEDIATELY
+  // ✅ Handle preflight early
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
   }
 
-  // ❌ Reject AFTER headers are set
   if (!isAllowed) {
     return res.status(403).json({
       message: "CORS: Origin not allowed",
@@ -90,6 +96,7 @@ app.use((req, res, next) => {
 
   next();
 });
+
 
 
 
