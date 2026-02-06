@@ -120,6 +120,17 @@ exports.sendEmailNotification = async (req, res) => {
       });
     }
 
+    // 1️⃣ Validate saree array before mapping
+    const hasInvalidSareeId = saree.some(
+      (s) => !s.sareeId || s.sareeId.trim() === ""
+    );
+
+    if (hasInvalidSareeId) {
+      return res.status(400).json({
+        message: "sareeId should be present for all sarees",
+      });
+    }
+
     /* ---------- IDEMPOTENCY ---------- */
     const sareeIds = saree.map(s => s.sareeId);
 

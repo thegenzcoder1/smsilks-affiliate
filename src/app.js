@@ -104,5 +104,6 @@ app.get("/", (req, res) => {
 
 app.use("/api", require("./routes/promoCode.routes"));
 app.use("/api", require("./routes/whatsapp.routes"));
+app.use("/api", require("./routes/saree.routes"));
 
 module.exports = app;
