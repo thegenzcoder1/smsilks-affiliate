@@ -51,9 +51,9 @@ app.use((req, res, next) => {
   const secret_access_key = req.headers.secret_access_key;
 
   // ✅ Allow non-browser requests
-  if (!origin) {
-    return next();
-  }
+  // if (!origin) {
+  //   return next();
+  // }
 
   const allowedOrigins = [
     // "http://localhost:5173",
