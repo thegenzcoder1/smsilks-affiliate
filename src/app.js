@@ -54,21 +54,28 @@ app.use((req, res, next) => {
     "https://kancheepuramsmsilks.net",
   ];
 
-  const isAllowed =
-    // ✅ Allow server-to-server / curl / nginx
-    !origin ||
+  let isAllowed = false;
 
-    // ✅ Exact allowed origins
-    allowedOrigins.includes(origin) ||
+  /* =========================
+     CASE 1: Browser request
+  ========================== */
+  if (origin) {
+    isAllowed =
+      allowedOrigins.includes(origin) ||
+      origin.endsWith(".kancheepuramsmsilks.net");
+  }
 
-    // ✅ Subdomains (ONLY if origin exists)
-    (typeof origin === "string" &&
-      origin.endsWith(".kancheepuramsmsilks.net")) ||
+  /* =========================
+     CASE 2: Server-to-server
+     (nginx / curl / healthcheck)
+  ========================== */
+  if (!origin && secret_access_key === process.env.POSTMAN_ACCESS_KEY) {
+    isAllowed = true;
+  }
 
-    // ✅ Postman / internal access
-    secret_access_key === process.env.POSTMAN_ACCESS_KEY;
-
-  // ✅ Always set headers (safe even if origin undefined)
+  /* =========================
+     SET HEADERS (safe)
+  ========================== */
   if (origin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
   }
@@ -83,11 +90,16 @@ app.use((req, res, next) => {
     "Content-Type, Authorization, secret_access_key"
   );
 
-  // ✅ Handle preflight early
+  /* =========================
+     PREFLIGHT
+  ========================== */
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
   }
 
+  /* =========================
+     FINAL CHECK
+  ========================== */
   if (!isAllowed) {
     return res.status(403).json({
       message: "CORS: Origin not allowed",
@@ -96,10 +108,6 @@ app.use((req, res, next) => {
 
   next();
 });
-
-
-
-
 
 app.use(express.json());
 
