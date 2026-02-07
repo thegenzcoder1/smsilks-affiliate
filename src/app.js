@@ -69,7 +69,7 @@ app.use((req, res, next) => {
      CASE 2: Server-to-server
      (nginx / curl / healthcheck)
   ========================== */
-  if (!origin && secret_access_key === process.env.POSTMAN_ACCESS_KEY) {
+  if (!origin && (secret_access_key === process.env.POSTMAN_ACCESS_KEY)) {
     isAllowed = true;
   }
 
