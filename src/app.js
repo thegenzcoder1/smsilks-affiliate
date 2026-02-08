@@ -6,39 +6,6 @@ const app = express();
 /* ================================
    CORS CONFIGURATION
 ================================ */
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like Postman, curl)
-    // if (!origin) return callback(null, true);
-    if(!origin) {
-      return callback(
-      new Error("Not allowed by CORS"),
-      false
-    );
-    }
-
-    // Allow all subdomains of kancheepuramsmsilks.com
-    if (origin.endsWith(".kancheepuramsmsilks.com")) {
-      return callback(null, true);
-    }
-
-    // Reject others
-    return callback(
-      new Error("Not allowed by CORS"),
-      false
-    );
-  },
-  methods: [
-    "GET",
-    "POST",
-    "PUT",
-    "PATCH",
-    "DELETE",
-    "OPTIONS",
-  ],
-  allowedHeaders: "*",
-  credentials: true,
-};
 
 /* ================================
    MIDDLEWARES
@@ -48,8 +15,8 @@ const corsOptions = {
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  const secret_access_key = req.headers.secret_access_key;
-
+  const secretAccessKey = req.headers['token'];
+  
   const allowedOrigins = [
     "https://kancheepuramsmsilks.net",
   ];
@@ -59,7 +26,12 @@ app.use((req, res, next) => {
   /* =========================
      CASE 1: Browser request
   ========================== */
-  if (origin) {
+
+
+  if(secretAccessKey === (process.env.POSTMAN_ACCESS_KEY)){
+        return next();
+}
+ if (origin) {
     isAllowed =
       allowedOrigins.includes(origin) ||
       origin.endsWith(".kancheepuramsmsilks.net");
@@ -69,9 +41,6 @@ app.use((req, res, next) => {
      CASE 2: Server-to-server
      (nginx / curl / healthcheck)
   ========================== */
-  if ((secret_access_key === process.env.POSTMAN_ACCESS_KEY)) {
-    isAllowed = true;
-  }
 
   /* =========================
      SET HEADERS (safe)
