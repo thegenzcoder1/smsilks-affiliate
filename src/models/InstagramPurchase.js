@@ -2,7 +2,11 @@ const mongoose = require("mongoose");
 
 const purchaseSchema = new mongoose.Schema(
   {
-    instaUsername: {
+    instaUsername: { // customer
+      type: String,
+      required: true,
+    },
+    affiliateInstagramUsername: {
       type: String,
       required: true,
     },
@@ -10,21 +14,13 @@ const purchaseSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    sareeBought: {
-      type: Number,
-      required: true,
-    },
-    totalBill: {
-      type: Number,
-      required: true,
-    },
-    whatsappMessageSent: {
-      type: Boolean,
-      default: false,
-    },
+    sareeBought: Number,
+    totalBill: Number,
+    emailMessageSent: Boolean,
   },
   { _id: false }
 );
+
 
 const instagramPurchaseSchema = new mongoose.Schema({
   promoCode: {

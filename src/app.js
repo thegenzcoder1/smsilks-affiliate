@@ -16,7 +16,7 @@ const app = express();
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   const secretAccessKey = req.headers['token'];
-  
+
   const allowedOrigins = [
     "https://kancheepuramsmsilks.net",
   ];
@@ -90,5 +90,6 @@ app.get("/", (req, res) => {
 app.use("/api", require("./routes/promoCode.routes"));
 app.use("/api", require("./routes/whatsapp.routes"));
 app.use("/api", require("./routes/saree.routes"));
+app.use("/api", require("./routes/leaderBoard.routes"))
 
 module.exports = app;

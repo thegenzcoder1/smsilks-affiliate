@@ -73,6 +73,11 @@ async function sendEmailWithRetry(to, promoCode, payload, maxRetries = 3) {
 /* ================================
    CONTROLLER
 ================================ */
+const {
+  getNormalizeMultiplier,
+  getPremiumPoints,
+} = require("../utils/leaderboardPoints");
+
 exports.sendEmailNotification = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -85,7 +90,7 @@ exports.sendEmailNotification = async (req, res) => {
       totalBill,
     } = req.body;
 
-    /* ---------- BASIC VALIDATION ---------- */
+    /* ---------- VALIDATION ---------- */
     if (
       !promoCode ||
       !instagramUsername ||
@@ -94,16 +99,13 @@ exports.sendEmailNotification = async (req, res) => {
       saree.length === 0 ||
       !totalBill
     ) {
-      return res.status(400).json({
-        message:
-          "Missing required fields. promoCode, instagramUsername, instagramUserPhone, saree[], totalBill are required.",
-      });
+      return res.status(400).json({ message: "Missing required fields" });
     }
 
     promoCode = promoCode.toUpperCase().trim();
     instagramUsername = instagramUsername.trim();
 
-    /* ---------- PROMO VALIDATION ---------- */
+    /* ---------- PROMO ---------- */
     const promo = await PromoCode.findOne({ promoCode }).lean();
     if (!promo) {
       return res.status(404).json({ message: "PromoCode Not Found" });
@@ -112,38 +114,10 @@ exports.sendEmailNotification = async (req, res) => {
     const affiliates = promo.details.map(d => ({
       email: d.email,
       discountPercentage: d.discountPercentage,
+      affiliateInstagramUsername: d.affiliateInstagramUsername,
     }));
 
-    if (affiliates.length === 0) {
-      return res.status(404).json({
-        message: "No Affiliate Email Present For This Coupon Code",
-      });
-    }
-
-    // 1️⃣ Validate saree array before mapping
-    const hasInvalidSareeId = saree.some(
-      (s) => !s.sareeId || s.sareeId.trim() === ""
-    );
-
-    if (hasInvalidSareeId) {
-      return res.status(400).json({
-        message: "sareeId should be present for all sarees",
-      });
-    }
-
     /* ---------- IDEMPOTENCY ---------- */
-    const sareeIds = saree.map(s => s.sareeId);
-
-    const existingSarees = await Saree.find({
-      sareeId: { $in: sareeIds },
-    }).lean();
-
-    if (existingSarees.length > 0) {
-      return res.status(409).json({
-        message: `${existingSarees.map(s => s.sareeId).join(", ")} Already Exists.`,
-      });
-    }
-
     const existingPurchase = await InstagramPurchase.findOne({
       promoCode,
       "purchases.instaUsername": instagramUsername,
@@ -151,17 +125,13 @@ exports.sendEmailNotification = async (req, res) => {
 
     if (existingPurchase) {
       return res.status(409).json({
-        message: `username: ${instagramUsername} can use this promo code only once. For additional purchases, please ask a different individual with their own Instagram account to comment and claim the offer.`,
+        message: "Promo already used by this user",
       });
     }
 
-    const sareeNames = saree.map(s => s.sareeName).join(", ");
-    const sareeBoughtCount = saree.length;
-
-    /* ---------- TRANSACTION START ---------- */
     session.startTransaction();
 
-    // 1️⃣ Insert Sarees
+    /* ---------- INSERT SAREES ---------- */
     await Saree.insertMany(
       saree.map(s => ({
         sareeId: s.sareeId,
@@ -170,67 +140,90 @@ exports.sendEmailNotification = async (req, res) => {
       { session }
     );
 
-    // 2️⃣ Insert Purchase (tentative)
+    /* ---------- INSERT PURCHASE ---------- */
     let purchaseDoc = await InstagramPurchase.findOne(
       { promoCode },
       null,
       { session }
     );
 
-    const newPurchase = {
+    const newPurchases = affiliates.map(a => ({
       instaUsername: instagramUsername,
+      affiliateInstagramUsername: a.affiliateInstagramUsername,
       instaUserPhone: instagramUserPhone,
-      sareeBought: sareeBoughtCount,
+      sareeBought: saree.length,
       totalBill,
-      emailMessageSent: true, // optimistic
-    };
+      emailMessageSent: true,
+    }));
 
     if (!purchaseDoc) {
       purchaseDoc = new InstagramPurchase({
         promoCode,
-        purchases: [newPurchase],
+        purchases: newPurchases,
       });
     } else {
-      purchaseDoc.purchases.push(newPurchase);
+      purchaseDoc.purchases.push(...newPurchases);
     }
 
     await purchaseDoc.save({ session });
 
-    // 3️⃣ Send Emails (CRITICAL)
+    /* ---------- SEND EMAILS (CRITICAL) ---------- */
     for (const affiliate of affiliates) {
-      const affiliateAmount = Math.round(
-        totalBill * (affiliate.discountPercentage / 100)
-      );
-
-      const payload = {
-        instaUsername: instagramUsername,
-        instaUserPhone: instagramUserPhone,
-        sareeBought: sareeBoughtCount,
-        sareeNames,
-        billAmount: totalBill,
-        discountPercentage: affiliate.discountPercentage,
-        affiliateAmount,
-      };
-
       const sent = await sendEmailWithRetry(
         affiliate.email,
         promoCode,
-        payload,
+        { instagramUsername, totalBill },
         3
       );
 
-      if (!sent) {
-        throw new Error(`Email failed for ${affiliate.email}`);
-      }
+      if (!sent) throw new Error("Email failed");
     }
 
-    // 4️⃣ All success → COMMIT
+    /* ---------- LEADERBOARD UPSERT ---------- */
+    for (const affiliate of affiliates) {
+      const username = affiliate.affiliateInstagramUsername;
+
+      let leaderboard = await Leaderboard.findOne(
+        { instagramUsername: username },
+        null,
+        { session }
+      );
+
+      const followersCount = leaderboard?.followersCount || 0;
+      const normalize = getNormalizeMultiplier(followersCount);
+
+      const orderPointsEarned = saree.length * 10 * normalize;
+      const premiumPointsEarned = getPremiumPoints(followersCount);
+      const consistencyPointsEarned =
+        (leaderboard?.consistencyPoints || 0) + 5;
+
+      if (!leaderboard) {
+        leaderboard = new Leaderboard({
+          instagramUsername: username,
+          followersCount,
+          orderPoints: orderPointsEarned,
+          premiumPoints: premiumPointsEarned,
+          consistencyPoints: 5,
+        });
+      } else {
+        leaderboard.orderPoints += orderPointsEarned;
+        leaderboard.premiumPoints += premiumPointsEarned;
+        leaderboard.consistencyPoints = consistencyPointsEarned;
+      }
+
+      leaderboard.totalPoints =
+        leaderboard.orderPoints +
+        leaderboard.premiumPoints +
+        leaderboard.consistencyPoints;
+
+      await leaderboard.save({ session });
+    }
+
+    /* ---------- COMMIT ---------- */
     await session.commitTransaction();
 
     return res.status(200).json({
-      message: "Email notification process successful",
-      promoCode,
-      purchase: newPurchase,
+      message: "Purchase + Leaderboard update successful",
     });
 
   } catch (error) {
@@ -238,7 +231,7 @@ exports.sendEmailNotification = async (req, res) => {
     console.error(error);
 
     return res.status(500).json({
-      message: "Transaction failed. No data was saved.",
+      message: "Transaction failed. No data saved.",
       error: error.message,
     });
   } finally {
