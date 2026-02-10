@@ -1,20 +1,25 @@
 // controllers/email.controller.js
+const Leaderboard = require("../models/LeaderBoard");
 const PromoCode = require("../models/PromoCode");
 const Saree = require("../models/Saree");
 const InstagramPurchase = require("../models/InstagramPurchase");
 const mongoose = require("mongoose");
 const { Resend } = require("resend");
 
-// Initialize Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+const {
+  getNormalizeMultiplier,
+  getPremiumPoints,
+} = require("../utils/leaderboardPoints");
+
 /* ================================
-   EMAIL SENDER (RESEND)
+   EMAIL SENDER
 ================================ */
 async function sendEmailViaResend(to, promoCode, payload) {
   const {
-    instaUsername,
-    instaUserPhone,
+    instagramUsername,
+    instagramUserPhone,
     sareeBought,
     sareeNames,
     billAmount,
@@ -30,8 +35,8 @@ async function sendEmailViaResend(to, promoCode, payload) {
       <h2>New Instagram Sale 🎉</h2>
 
       <p><strong>Promo Code:</strong> ${promoCode}</p>
-      <p><strong>Instagram Username:</strong> ${instaUsername}</p>
-      <p><strong>Customer Phone:</strong> ${instaUserPhone}</p>
+      <p><strong>Instagram Username:</strong> ${instagramUsername}</p>
+      <p><strong>Customer Phone:</strong> ${instagramUserPhone}</p>
 
       <hr />
 
@@ -43,17 +48,12 @@ async function sendEmailViaResend(to, promoCode, payload) {
       <p><strong>Total Bill:</strong> Rs. ${billAmount}</p>
       <p><strong>Your Discount:</strong> ${discountPercentage}%</p>
       <p><strong>Your Earnings:</strong> Rs. ${affiliateAmount}</p>
-
-      <br />
-      <p>
-        Thank you for partnering with <strong>Kancheepuram SMSilks</strong>.
-      </p>
     `,
   });
 }
 
 /* ================================
-   RETRY WRAPPER (3 ATTEMPTS)
+   RETRY WRAPPER
 ================================ */
 async function sendEmailWithRetry(to, promoCode, payload, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -61,28 +61,20 @@ async function sendEmailWithRetry(to, promoCode, payload, maxRetries = 3) {
       await sendEmailViaResend(to, promoCode, payload);
       return true;
     } catch (err) {
-      console.error(
-        `Email attempt ${attempt} failed for ${to}`,
-        err.message
-      );
+      console.error(`Email attempt ${attempt} failed`, err.message);
       if (attempt === maxRetries) return false;
     }
   }
 }
 
 /* ================================
-   CONTROLLER
+   MAIN CONTROLLER
 ================================ */
-const {
-  getNormalizeMultiplier,
-  getPremiumPoints,
-} = require("../utils/leaderboardPoints");
-
 exports.sendEmailNotification = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    let {
+    const {
       promoCode,
       instagramUsername,
       instagramUserPhone,
@@ -99,39 +91,53 @@ exports.sendEmailNotification = async (req, res) => {
       saree.length === 0 ||
       !totalBill
     ) {
-      return res.status(400).json({ message: "Missing required fields" });
-    }
-
-    promoCode = promoCode.toUpperCase().trim();
-    instagramUsername = instagramUsername.trim();
-
-    /* ---------- PROMO ---------- */
-    const promo = await PromoCode.findOne({ promoCode }).lean();
-    if (!promo) {
-      return res.status(404).json({ message: "PromoCode Not Found" });
-    }
-
-    const affiliates = promo.details.map(d => ({
-      email: d.email,
-      discountPercentage: d.discountPercentage,
-      affiliateInstagramUsername: d.affiliateInstagramUsername,
-    }));
-
-    /* ---------- IDEMPOTENCY ---------- */
-    const existingPurchase = await InstagramPurchase.findOne({
-      promoCode,
-      "purchases.instaUsername": instagramUsername,
-    }).lean();
-
-    if (existingPurchase) {
-      return res.status(409).json({
-        message: "Promo already used by this user",
+      return res.status(400).json({
+        message: "Missing required fields",
       });
     }
 
+    const normalizedPromoCode = promoCode.toUpperCase().trim();
+    const customerUsername = instagramUsername.trim();
+    const customerPhone = instagramUserPhone.trim();
+
+    /* ---------- PROMO ---------- */
+    const promo = await PromoCode.findOne({
+      promoCode: normalizedPromoCode,
+    }).lean();
+
+    if (!promo || promo.details.length === 0) {
+      return res.status(404).json({ message: "Invalid PromoCode" });
+    }
+
+    /* ---------- DUPLICATE CHECK ---------- */
+    const sareeIds = saree.map(s => s.sareeId);
+
+    const existingSarees = await Saree.find({
+      sareeId: { $in: sareeIds },
+    }).lean();
+
+    if (existingSarees.length > 0) {
+      return res.status(409).json({
+        message: `Saree already exists: ${existingSarees
+          .map(s => s.sareeId)
+          .join(", ")}`,
+      });
+    }
+
+    const used = await InstagramPurchase.findOne({
+      promoCode: normalizedPromoCode,
+      "purchases.instaUsername": customerUsername,
+    }).lean();
+
+    if (used) {
+      return res.status(409).json({
+        message: "Promo already used by this customer",
+      });
+    }
+
+    /* ---------- TRANSACTION ---------- */
     session.startTransaction();
 
-    /* ---------- INSERT SAREES ---------- */
     await Saree.insertMany(
       saree.map(s => ({
         sareeId: s.sareeId,
@@ -140,47 +146,60 @@ exports.sendEmailNotification = async (req, res) => {
       { session }
     );
 
-    /* ---------- INSERT PURCHASE ---------- */
+    const sareeBoughtCount = saree.length;
+    const sareeNames = saree.map(s => s.sareeName).join(", ");
+
     let purchaseDoc = await InstagramPurchase.findOne(
-      { promoCode },
+      { promoCode: normalizedPromoCode },
       null,
       { session }
     );
 
-    const newPurchases = affiliates.map(a => ({
-      instaUsername: instagramUsername,
+    const purchaseEntries = promo.details.map(a => ({
+      instaUsername: customerUsername,
       affiliateInstagramUsername: a.affiliateInstagramUsername,
-      instaUserPhone: instagramUserPhone,
-      sareeBought: saree.length,
+      instaUserPhone: customerPhone,
+      sareeBought: sareeBoughtCount,
       totalBill,
       emailMessageSent: true,
     }));
 
     if (!purchaseDoc) {
       purchaseDoc = new InstagramPurchase({
-        promoCode,
-        purchases: newPurchases,
+        promoCode: normalizedPromoCode,
+        purchases: purchaseEntries,
       });
     } else {
-      purchaseDoc.purchases.push(...newPurchases);
+      purchaseDoc.purchases.push(...purchaseEntries);
     }
 
     await purchaseDoc.save({ session });
 
-    /* ---------- SEND EMAILS (CRITICAL) ---------- */
-    for (const affiliate of affiliates) {
+    /* ---------- EMAILS ---------- */
+    for (const affiliate of promo.details) {
+      const payload = {
+        instagramUsername: customerUsername,
+        instagramUserPhone: customerPhone,
+        sareeBought: sareeBoughtCount,
+        sareeNames,
+        billAmount: totalBill,
+        discountPercentage: affiliate.discountPercentage,
+        affiliateAmount: Math.round(
+          totalBill * (affiliate.discountPercentage / 100)
+        ),
+      };
+
       const sent = await sendEmailWithRetry(
         affiliate.email,
-        promoCode,
-        { instagramUsername, totalBill },
-        3
+        normalizedPromoCode,
+        payload
       );
 
       if (!sent) throw new Error("Email failed");
     }
 
-    /* ---------- LEADERBOARD UPSERT ---------- */
-    for (const affiliate of affiliates) {
+    /* ---------- LEADERBOARD ---------- */
+    for (const affiliate of promo.details) {
       const username = affiliate.affiliateInstagramUsername;
 
       let leaderboard = await Leaderboard.findOne(
@@ -189,13 +208,14 @@ exports.sendEmailNotification = async (req, res) => {
         { session }
       );
 
-      const followersCount = leaderboard?.followersCount || 0;
+      const followersCount = leaderboard?.followersCount ?? 0;
       const normalize = getNormalizeMultiplier(followersCount);
 
-      const orderPointsEarned = saree.length * 10 * normalize;
-      const premiumPointsEarned = getPremiumPoints(followersCount);
-      const consistencyPointsEarned =
-        (leaderboard?.consistencyPoints || 0) + 5;
+      const orderPointsEarned =
+        sareeBoughtCount * 10 * normalize;
+
+      const premiumPointsEarned =
+        getPremiumPoints(followersCount);
 
       if (!leaderboard) {
         leaderboard = new Leaderboard({
@@ -208,7 +228,7 @@ exports.sendEmailNotification = async (req, res) => {
       } else {
         leaderboard.orderPoints += orderPointsEarned;
         leaderboard.premiumPoints += premiumPointsEarned;
-        leaderboard.consistencyPoints = consistencyPointsEarned;
+        leaderboard.consistencyPoints += 5;
       }
 
       leaderboard.totalPoints =
@@ -219,20 +239,17 @@ exports.sendEmailNotification = async (req, res) => {
       await leaderboard.save({ session });
     }
 
-    /* ---------- COMMIT ---------- */
     await session.commitTransaction();
 
     return res.status(200).json({
-      message: "Purchase + Leaderboard update successful",
+      message: "Purchase, emails & leaderboard updated successfully",
     });
 
-  } catch (error) {
+  } catch (err) {
     await session.abortTransaction();
-    console.error(error);
-
     return res.status(500).json({
-      message: "Transaction failed. No data saved.",
-      error: error.message,
+      message: "Transaction failed",
+      error: err.message,
     });
   } finally {
     session.endSession();

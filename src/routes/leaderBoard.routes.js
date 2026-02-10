@@ -17,20 +17,19 @@ const {
 } = require("../controllers/leaderboard.controller");
 
 /* -------- AUTH -------- */
-router.post("/login", login);
-router.post("/create", adminMiddleware, createUser);
+router.post("/leaderboard/login", login);
+router.post("/leaderboard/create", adminMiddleware, createUser);
 
 /* -------- LEADERBOARD -------- */
-router.get("/users", authMiddleware, getUsers);
-router.get("/user/:instagramUsername", authMiddleware, getUserByUsername);
+router.get("/leaderboard/users", authMiddleware, getUsers);
+router.get("/leaderboard/user/:instagramUsername", authMiddleware, getUserByUsername);
 router.patch(
-  "/user/:instagramUsername",
+  "/leaderboard/user/:instagramUsername",
   authMiddleware,
   requestFollowersUpdate
 );
 router.patch(
-  "/admin/:instagramUsername",
-  authMiddleware,
+  "/leaderboard/admin/:instagramUsername",  
   adminMiddleware,
   adminUpdateFollowers
 );

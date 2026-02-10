@@ -48,6 +48,14 @@ const promoCodeSchema = new mongoose.Schema({
         },
         message: "Duplicate email not allowed for the same promoCode",
       },
+      {
+        // ✅ unique email per promoCode
+        validator: function (arr) {
+          const affiliateInstagramUsername = arr.map(d => d.affiliateInstagramUsername);
+          return affiliateInstagramUsername.length === new Set(affiliateInstagramUsername).size;
+        },
+        message: "Duplicate Affiliate Instagram Username not allowed for the same promoCode",
+      },
     ],
   },
 });

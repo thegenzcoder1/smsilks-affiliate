@@ -1,6 +1,7 @@
+const { Resend } = require("resend");
+const resend = new Resend(process.env.RESEND_API_KEY);
 const Leaderboard = require("../models/LeaderBoard");
 const mongoose = require("mongoose");
-const sendAdminNotificationEmail = require("../utils/sendAdminNotificationEmail");
 
 /* ==============================
    UTIL: Mask Instagram Username
@@ -112,12 +113,33 @@ exports.requestFollowersUpdate = async (req, res) => {
     }
 
     // 🔔 Email only (NO DB UPDATE)
-    await sendAdminNotificationEmail({
+await resend.emails.send({
+      from: "affiliate-noreply@kancheepuramsmsilks.net",
       to: "business@kancheepuramsmsilks.net",
-      subject: "Follower Count Update Request",
-      body: `
-        Instagram User: ${instagramUsername}
-        Requested Followers Count: ${followers_count}
+      subject: "📢 Follower Count Update Request",
+      html: `
+        <h2>Follower Count Update Request 🔔</h2>
+
+        <p>An influencer has requested a followers count update.</p>
+
+        <hr />
+
+        <p><strong>Instagram Username:</strong> ${instagramUsername}</p>
+        <p><strong>Requested Followers Count:</strong> ${followers_count}</p>
+
+        <hr />
+
+        <p>
+          Please verify the follower count manually and approve the update
+          via the Admin API.
+        </p>
+
+        <br />
+
+        <p>
+          Regards,<br />
+          <strong>Kancheepuram SM Silks – Affiliate System</strong>
+        </p>
       `,
     });
 

@@ -24,9 +24,11 @@ app.use((req, res, next) => {
   let isAllowed = false;
 
   /* =========================
-     CASE 1: Browser request
+     CASE 1: Browser OPTION request
   ========================== */
-
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
 
   if(secretAccessKey === (process.env.POSTMAN_ACCESS_KEY)){
         return next();
@@ -62,9 +64,7 @@ app.use((req, res, next) => {
   /* =========================
      PREFLIGHT
   ========================== */
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
+
 
   /* =========================
      FINAL CHECK

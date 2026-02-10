@@ -50,21 +50,32 @@ exports.createPromoCode = async (req, res) => {
 
 // Initialize Resend
 
-
 exports.addEmailToPromoCode = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    let { promoCode, email, discountPercentage } = req.body;
+    let {
+      promoCode,
+      email,
+      discountPercentage,
+      affiliateInstagramUsername,
+    } = req.body;
 
-    if (!promoCode || !email || discountPercentage === undefined) {
+    if (
+      !promoCode ||
+      !email ||
+      discountPercentage === undefined ||
+      !affiliateInstagramUsername
+    ) {
       return res.status(400).json({
-        message: "promoCode, email and discountPercentage are required",
+        message:
+          "promoCode, email, affiliateInstagramUsername and discountPercentage are required",
       });
     }
 
     promoCode = promoCode.toUpperCase().trim();
     email = email.toLowerCase().trim();
+    affiliateInstagramUsername = affiliateInstagramUsername.trim();
 
     session.startTransaction();
 
@@ -77,66 +88,84 @@ exports.addEmailToPromoCode = async (req, res) => {
     if (!promo) {
       await session.abortTransaction();
       return res.status(404).json({
-        message: "Promo code does not exist. Cannot add email.",
+        message: "Promo code does not exist. Cannot add affiliate.",
       });
     }
 
-    const existingDetail = promo.details.find(
+    // ❌ Duplicate email check
+    const emailExists = promo.details.find(
       (d) => d.email === email
     );
 
-    if (existingDetail) {
+    if (emailExists) {
       await session.abortTransaction();
       return res.status(409).json({
         message: `Email ${email} already exists for promoCode ${promoCode}`,
       });
     }
 
-    // 1️⃣ Add email + discount (NOT committed yet)
+    // ❌ Duplicate affiliate username check
+    const affiliateExists = promo.details.find(
+      (d) =>
+        d.affiliateInstagramUsername === affiliateInstagramUsername
+    );
+
+    if (affiliateExists) {
+      await session.abortTransaction();
+      return res.status(409).json({
+        message:
+          "Affiliate Instagram username already exists for this promo code",
+      });
+    }
+
+    // ✅ Add affiliate
     promo.details.push({
+      affiliateInstagramUsername,
       email,
-      discountPercentage      
+      discountPercentage,
     });
 
     await promo.save({ session });
 
-    // 2️⃣ SEND EMAIL (CRITICAL STEP)
+    // 📧 Send email (CRITICAL)
     await resend.emails.send({
       from: "affiliate-noreply@kancheepuramsmsilks.net",
       to: email,
       subject: `Your Promo Code For This Campaign - ${promoCode}`,
       html: `
         <h3>Love All. Serve All.</h3>
-        <p>You have been added To The New affiliate. Below Are The PromoCode Details...</p>
+        <p>You have been added as an affiliate.</p>
+
+        <p><b>Instagram Username:</b> ${affiliateInstagramUsername}</p>
         <p><b>Promo Code:</b> ${promoCode}</p>
         <p><b>Your Discount:</b> ${discountPercentage}%</p>
-        <hr></hr>
+
+        <hr />
         <p>You will receive notifications whenever a sale happens.</p>
-        <p>Thanks And Regards,</p>
         <p>Kancheepuram SM Silks</p>
       `,
     });
 
-    // 3️⃣ EMAIL SUCCESS → COMMIT
     await session.commitTransaction();
     session.endSession();
 
     return res.status(201).json({
-      message: "Email added to promo code and notification sent successfully",
+      message:
+        "Affiliate added and notification sent successfully",
       promo,
     });
-
   } catch (error) {
-    // ❌ Any failure → rollback
     await session.abortTransaction();
     session.endSession();
 
     return res.status(500).json({
-      message: "Failed to add affiliate email",
+      message: "Failed to add affiliate",
       error: error.message,
     });
   }
 };
+
+
 
 /**
  * PUT /promoCode/email
