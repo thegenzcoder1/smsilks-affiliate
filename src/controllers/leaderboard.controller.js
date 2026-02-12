@@ -64,8 +64,8 @@ exports.getUsers = async (req, res) => {
    Single leaderboard user
 ================================ */
 exports.getUserByUsername = async (req, res) => {
-  try {
-    const { instagramUsername } = req.params;
+  try {    
+    const { instagramUsername } = req.user;
 
     const user = await Leaderboard.findOne({
       instagramUsername,

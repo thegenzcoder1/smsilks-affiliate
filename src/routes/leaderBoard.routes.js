@@ -22,7 +22,7 @@ router.post("/leaderboard/create", adminMiddleware, createUser);
 
 /* -------- LEADERBOARD -------- */
 router.get("/leaderboard/users", authMiddleware, getUsers);
-router.get("/leaderboard/user/:instagramUsername", authMiddleware, getUserByUsername);
+router.get("/leaderboard/user", authMiddleware, getUserByUsername);
 router.patch(
   "/leaderboard/user/:instagramUsername",
   authMiddleware,

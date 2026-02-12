@@ -14,7 +14,7 @@ module.exports = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // 🔑 Attach decoded user to request
+    // 🔑 Attach decoded user to request    
     req.user = {
       instagramUsername: decoded.instagramUsername,
     };

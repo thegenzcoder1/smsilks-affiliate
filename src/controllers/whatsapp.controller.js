@@ -103,7 +103,7 @@ exports.sendEmailNotification = async (req, res) => {
     /* ---------- PROMO ---------- */
     const promo = await PromoCode.findOne({
       promoCode: normalizedPromoCode,
-    }).lean();
+    });
 
     if (!promo || promo.details.length === 0) {
       return res.status(404).json({ message: "Invalid PromoCode" });
