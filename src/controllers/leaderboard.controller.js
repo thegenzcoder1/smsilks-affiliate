@@ -1,6 +1,9 @@
 const { Resend } = require("resend");
 const resend = new Resend(process.env.RESEND_API_KEY);
 const Leaderboard = require("../models/LeaderBoard");
+const LeaderboardUser = require("../models/LeaderboardUser");
+const PromoCode = require("../models/PromoCode");
+const InstagramPurchase = require("../models/InstagramPurchase");
 const mongoose = require("mongoose");
 
 /* ==============================
@@ -11,6 +14,49 @@ function maskUsername(username) {
   if (!username || username.length <= 3) return "***";
   return username.slice(0, 3) + "*".repeat(username.length - 3);
 }
+
+exports.getUsersForAdmin = async (req, res) => {
+  try {
+    let { offset = 0, limit = 10 } = req.query;
+
+    offset = Math.max(parseInt(offset, 10), 0);
+    limit = Math.min(Math.max(parseInt(limit, 10), 1), 50);
+
+    const [users, total] = await Promise.all([
+      Leaderboard.find({})
+        .sort({ totalPoints: -1 })
+        .skip(offset)
+        .limit(limit)
+        .lean(),
+
+      Leaderboard.countDocuments(),
+    ]);
+
+    const response = users.map(u => ({
+      instagramUsername: u.instagramUsername,
+      followersCount: u.followersCount,
+      orderPoints: u.orderPoints,
+      premiumPoints: u.premiumPoints,
+      consistencyPoints: u.consistencyPoints,
+      totalPoints: u.totalPoints,
+    }));
+
+    return res.status(200).json({
+      data: response,
+      pagination: {
+        offset,
+        limit,
+        total,
+        hasMore: offset + response.length < total,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Failed to fetch leaderboard users",
+    });
+  }
+};
 
 /* ==============================
    1️⃣ GET /users
@@ -203,6 +249,151 @@ exports.adminUpdateFollowers = async (req, res) => {
     console.error(error);
     return res.status(500).json({
       message: "Admin update failed",
+    });
+  }
+};
+
+
+
+
+
+exports.adminDeleteLeaderboardUser = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const adminToken = req.headers["admin-token"];
+
+    if (adminToken !== process.env.ADMIN_TOKEN) {
+      return res.status(403).json({
+        message: "Invalid admin token",
+      });
+    }
+
+    const { instagramUsername } = req.params;
+
+    if (!instagramUsername) {
+      return res.status(400).json({
+        message: "instagramUsername is required",
+      });
+    }
+
+    const username = instagramUsername.trim().toLowerCase();
+
+    session.startTransaction();
+
+    /* ---------------------------------
+       1️⃣ Delete Leaderboard entry
+    ---------------------------------- */
+    const deletedLeaderboard = await Leaderboard.findOneAndDelete(
+      { instagramUsername: username },
+      { session }
+    );
+
+    if (!deletedLeaderboard) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        message: "Leaderboard user not found",
+      });
+    }
+
+    /* ---------------------------------
+       2️⃣ Delete Auth user
+    ---------------------------------- */
+    await LeaderboardUser.findOneAndDelete(
+      { instagramUsername: username },
+      { session }
+    );
+
+    /* ---------------------------------
+       3️⃣ Remove from ALL PromoCodes
+       (Pull from embedded details array)
+    ---------------------------------- */
+    await PromoCode.updateMany(
+      {
+        "details.affiliateInstagramUsername": username,
+      },
+      {
+        $pull: {
+          details: {
+            affiliateInstagramUsername: username,
+          },
+        },
+      },
+      { session }
+    );
+
+    /* ---------------------------------
+       4️⃣ Commit
+    ---------------------------------- */
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      message:
+        "Leaderboard, Auth user, and all promoCode affiliations removed successfully",
+      deletedUsername: username,
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Admin delete failed",
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+
+
+/*
+GET /api/leaderboard/user
+Returns purchase history for logged-in affiliate
+*/
+exports.getAffiliatePurchaseHistory = async (req, res) => {
+  try {
+    // ✅ Extract username from JWT middleware
+    const {instagramUsername} = req.user;
+    const affiliateUsername = instagramUsername;
+
+    const purchases = await InstagramPurchase.find({
+      "purchases.affiliateInstagramUsername": affiliateUsername,
+    }).lean();
+
+    if (!purchases || purchases.length === 0) {
+      return res.status(200).json({
+        message: "No purchases found",
+        data: [],
+      });
+    }
+
+    // 🔎 Filter only relevant purchases per promoCode
+    const result = purchases.map(doc => {
+      const filtered = doc.purchases.filter(
+        p =>
+          p.affiliateInstagramUsername.toLowerCase() ===
+          affiliateUsername
+      );
+
+      return {
+        promoCode: doc.promoCode,
+        purchases: filtered,
+      };
+    }).filter(r => r.purchases.length > 0);
+
+    return res.status(200).json({
+      affiliateInstagramUsername: affiliateUsername,
+      totalPromoCodes: result.length,
+      data: result,
+    });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Failed to fetch purchase history",
+      error: error.message,
     });
   }
 };

@@ -246,6 +246,7 @@ exports.sendEmailNotification = async (req, res) => {
     });
 
   } catch (err) {
+    console.error(err);
     await session.abortTransaction();
     return res.status(500).json({
       message: "Transaction failed",
@@ -255,3 +256,160 @@ exports.sendEmailNotification = async (req, res) => {
     session.endSession();
   }
 };
+
+
+/* =========================================
+   GET /api/purchases/:promoCode
+========================================= */
+exports.getPurchasesByPromoCode = async (req, res) => {
+  try {
+    const { promoCode } = req.params;
+
+    if (!promoCode) {
+      return res.status(400).json({
+        message: "promoCode is required",
+      });
+    }
+
+    const normalizedPromoCode = promoCode.toUpperCase().trim();
+
+    const purchaseDoc = await InstagramPurchase.findOne({
+      promoCode: normalizedPromoCode,
+    }).lean();
+
+    if (!purchaseDoc) {
+      return res.status(404).json({
+        message: "No purchases found for this promoCode",
+      });
+    }
+
+    return res.status(200).json({
+      promoCode: normalizedPromoCode,
+      totalPurchases: purchaseDoc.purchases.length,
+      purchases: purchaseDoc.purchases,
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to fetch purchases",
+      error: error.message,
+    });
+  }
+};
+
+/* =========================================
+   DELETE /api/purchases
+   Body: { promoCode, instagramUsername }
+========================================= */
+exports.deletePurchaseByUsername = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { promoCode, instaUsername } = req.body;
+
+    if (!promoCode || !instaUsername) {
+      return res.status(400).json({
+        message: "promoCode and instaUsername required",
+      });
+    }
+
+    const normalizedPromoCode = promoCode.toUpperCase().trim();
+    const customerUsername = instaUsername.trim();
+
+    session.startTransaction();
+
+    /* ---------- FIND PURCHASE ---------- */
+    const purchaseDoc = await InstagramPurchase.findOne(
+      { promoCode: normalizedPromoCode },
+      null,
+      { session }
+    );
+
+    if (!purchaseDoc) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        message: "PromoCode not found",
+      });
+    }
+
+    const purchase = purchaseDoc.purchases.find(
+      p => p.instaUsername === customerUsername
+    );
+
+    if (!purchase) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        message: "Purchase not found",
+      });
+    }
+
+    const sareeBoughtCount = purchase.sareeBought;
+    const affiliateUsername = purchase.affiliateInstagramUsername;
+
+    /* ---------- REMOVE PURCHASE ---------- */
+    purchaseDoc.purchases = purchaseDoc.purchases.filter(
+      p => p.instaUsername !== customerUsername
+    );
+
+    await purchaseDoc.save({ session });
+
+    /* ---------- ROLLBACK LEADERBOARD ---------- */
+    const leaderboard = await Leaderboard.findOne(
+      { instagramUsername: affiliateUsername },
+      null,
+      { session }
+    );
+
+    if (leaderboard) {
+      const normalize = getNormalizeMultiplier(
+        leaderboard.followersCount
+      );
+
+      const orderPointsToReverse =
+        sareeBoughtCount * 10 * normalize;
+
+      const premiumPointsToReverse =
+        getPremiumPoints(leaderboard.followersCount);
+
+      // Reverse safely (never go negative)
+      leaderboard.orderPoints = Math.max(
+        0,
+        leaderboard.orderPoints - orderPointsToReverse
+      );
+
+      leaderboard.premiumPoints = Math.max(
+        0,
+        leaderboard.premiumPoints - premiumPointsToReverse
+      );
+
+      leaderboard.consistencyPoints = Math.max(
+        0,
+        leaderboard.consistencyPoints - 5
+      );
+
+      leaderboard.totalPoints =
+        leaderboard.orderPoints +
+        leaderboard.premiumPoints +
+        leaderboard.consistencyPoints;
+
+      await leaderboard.save({ session });
+    }
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      message: "Purchase deleted & leaderboard rolled back",
+    });
+
+  } catch (err) {
+    await session.abortTransaction();
+    return res.status(500).json({
+      message: "Delete failed",
+      error: err.message,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+

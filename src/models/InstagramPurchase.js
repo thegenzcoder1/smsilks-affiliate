@@ -31,12 +31,16 @@ const instagramPurchaseSchema = new mongoose.Schema({
   purchases: {
     type: [purchaseSchema],
     validate: {
-      validator: function (arr) {
-        const usernames = arr.map(p => p.instaUsername);
-        return usernames.length === new Set(usernames).size;
-      },
-      message: "Duplicate Instagram username for same promo code",
-    },
+  validator: function (arr) {
+    const pairs = arr.map(p =>
+      `${p.instaUsername}_${p.affiliateInstagramUsername}`
+    );
+
+    return pairs.length === new Set(pairs).size;
+  },
+  message:
+    "Duplicate Instagram username + affiliate combination for same promo code",
+},
   },
 });
 

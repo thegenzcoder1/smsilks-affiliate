@@ -14,15 +14,19 @@ const {
   getUserByUsername,
   requestFollowersUpdate,
   adminUpdateFollowers,
+  adminDeleteLeaderboardUser,
+  getUsersForAdmin,
+  getAffiliatePurchaseHistory
 } = require("../controllers/leaderboard.controller");
 
 /* -------- AUTH -------- */
 router.post("/leaderboard/login", login);
-router.post("/leaderboard/create", adminMiddleware, createUser);
+router.post("/leaderboard/admin/create", adminMiddleware, createUser);
 
 /* -------- LEADERBOARD -------- */
 router.get("/leaderboard/users", authMiddleware, getUsers);
 router.get("/leaderboard/user", authMiddleware, getUserByUsername);
+
 router.patch(
   "/leaderboard/user/:instagramUsername",
   authMiddleware,
@@ -33,5 +37,24 @@ router.patch(
   adminMiddleware,
   adminUpdateFollowers
 );
+
+router.delete(
+  "/leaderboard/admin/:instagramUsername",
+  adminMiddleware,
+  adminDeleteLeaderboardUser
+);
+
+router.get(
+  "/leaderboard/admin/:instagramUsername",
+  adminMiddleware,
+  getUsersForAdmin
+)
+
+router.get(
+  "/leaderboard/user/purchases",
+  authMiddleware,
+  getAffiliatePurchaseHistory
+);
+
 
 module.exports = router;
