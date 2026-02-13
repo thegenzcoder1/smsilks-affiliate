@@ -1,5 +1,7 @@
 const express = require("express");
 const app = express();
+const rateLimit = require('express-rate-limit');
+
 
 /* ================================
    GLOBAL CORS + SECURITY MIDDLEWARE
@@ -81,9 +83,15 @@ app.get("/", (req, res) => {
   res.send("API is running...");
 });
 
+app.use("/api", rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100
+}));
+
 app.use("/api", require("./routes/promoCode.routes"));
 app.use("/api", require("./routes/whatsapp.routes"));
 app.use("/api", require("./routes/saree.routes"));
 app.use("/api", require("./routes/leaderBoard.routes"));
+app.use("/api", require("./routes/promoLead.routes"));
 
 module.exports = app;

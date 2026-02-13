@@ -3,6 +3,7 @@ const Leaderboard = require("../models/LeaderBoard");
 const PromoCode = require("../models/PromoCode");
 const Saree = require("../models/Saree");
 const InstagramPurchase = require("../models/InstagramPurchase");
+const PromoCodeLead = require("../models/PromoCodeLead");
 const mongoose = require("mongoose");
 const { Resend } = require("resend");
 
@@ -110,7 +111,7 @@ exports.sendEmailNotification = async (req, res) => {
     }
 
     /* ---------- DUPLICATE CHECK ---------- */
-    const sareeIds = saree.map(s => s.sareeId);
+    const sareeIds = saree.map((s) => s.sareeId);
 
     const existingSarees = await Saree.find({
       sareeId: { $in: sareeIds },
@@ -119,7 +120,7 @@ exports.sendEmailNotification = async (req, res) => {
     if (existingSarees.length > 0) {
       return res.status(409).json({
         message: `Saree already exists: ${existingSarees
-          .map(s => s.sareeId)
+          .map((s) => s.sareeId)
           .join(", ")}`,
       });
     }
@@ -139,23 +140,23 @@ exports.sendEmailNotification = async (req, res) => {
     session.startTransaction();
 
     await Saree.insertMany(
-      saree.map(s => ({
+      saree.map((s) => ({
         sareeId: s.sareeId,
         sareeName: s.sareeName,
       })),
-      { session }
+      { session },
     );
 
     const sareeBoughtCount = saree.length;
-    const sareeNames = saree.map(s => s.sareeName).join(", ");
+    const sareeNames = saree.map((s) => s.sareeName).join(", ");
 
     let purchaseDoc = await InstagramPurchase.findOne(
       { promoCode: normalizedPromoCode },
       null,
-      { session }
+      { session },
     );
 
-    const purchaseEntries = promo.details.map(a => ({
+    const purchaseEntries = promo.details.map((a) => ({
       instaUsername: customerUsername,
       affiliateInstagramUsername: a.affiliateInstagramUsername,
       instaUserPhone: customerPhone,
@@ -185,18 +186,37 @@ exports.sendEmailNotification = async (req, res) => {
         billAmount: totalBill,
         discountPercentage: affiliate.discountPercentage,
         affiliateAmount: Math.round(
-          totalBill * (affiliate.discountPercentage / 100)
+          totalBill * (affiliate.discountPercentage / 100),
         ),
       };
 
       const sent = await sendEmailWithRetry(
         affiliate.email,
         normalizedPromoCode,
-        payload
+        payload,
       );
 
       if (!sent) throw new Error("Email failed");
     }
+
+    /* =========================================================
+       🔥 NEW: LEAD AUTO-CONVERSION (SAFE & TRANSACTIONAL)
+    ========================================================== */
+    
+    await PromoCodeLead.updateOne(
+      {
+        promoCode: normalizedPromoCode,
+        instagramUsername: customerUsername,
+        isConverted: false,
+      },
+      {
+        $set: {
+          isConverted: true,
+          convertedAt: new Date(),
+        },
+      },
+      { session },
+    );
 
     /* ---------- LEADERBOARD ---------- */
     for (const affiliate of promo.details) {
@@ -205,17 +225,15 @@ exports.sendEmailNotification = async (req, res) => {
       let leaderboard = await Leaderboard.findOne(
         { instagramUsername: username },
         null,
-        { session }
+        { session },
       );
 
       const followersCount = leaderboard?.followersCount ?? 0;
       const normalize = getNormalizeMultiplier(followersCount);
 
-      const orderPointsEarned =
-        sareeBoughtCount * 10 * normalize;
+      const orderPointsEarned = sareeBoughtCount * 10 * normalize;
 
-      const premiumPointsEarned =
-        getPremiumPoints(followersCount);
+      const premiumPointsEarned = getPremiumPoints(followersCount);
 
       if (!leaderboard) {
         leaderboard = new Leaderboard({
@@ -244,7 +262,6 @@ exports.sendEmailNotification = async (req, res) => {
     return res.status(200).json({
       message: "Purchase, emails & leaderboard updated successfully",
     });
-
   } catch (err) {
     console.error(err);
     await session.abortTransaction();
@@ -256,7 +273,6 @@ exports.sendEmailNotification = async (req, res) => {
     session.endSession();
   }
 };
-
 
 /* =========================================
    GET /api/purchases/:promoCode
@@ -288,7 +304,6 @@ exports.getPurchasesByPromoCode = async (req, res) => {
       totalPurchases: purchaseDoc.purchases.length,
       purchases: purchaseDoc.purchases,
     });
-
   } catch (error) {
     return res.status(500).json({
       message: "Failed to fetch purchases",
@@ -322,7 +337,7 @@ exports.deletePurchaseByUsername = async (req, res) => {
     const purchaseDoc = await InstagramPurchase.findOne(
       { promoCode: normalizedPromoCode },
       null,
-      { session }
+      { session },
     );
 
     if (!purchaseDoc) {
@@ -333,7 +348,7 @@ exports.deletePurchaseByUsername = async (req, res) => {
     }
 
     const purchase = purchaseDoc.purchases.find(
-      p => p.instaUsername === customerUsername
+      (p) => p.instaUsername === customerUsername,
     );
 
     if (!purchase) {
@@ -348,7 +363,7 @@ exports.deletePurchaseByUsername = async (req, res) => {
 
     /* ---------- REMOVE PURCHASE ---------- */
     purchaseDoc.purchases = purchaseDoc.purchases.filter(
-      p => p.instaUsername !== customerUsername
+      (p) => p.instaUsername !== customerUsername,
     );
 
     await purchaseDoc.save({ session });
@@ -357,34 +372,32 @@ exports.deletePurchaseByUsername = async (req, res) => {
     const leaderboard = await Leaderboard.findOne(
       { instagramUsername: affiliateUsername },
       null,
-      { session }
+      { session },
     );
 
     if (leaderboard) {
-      const normalize = getNormalizeMultiplier(
-        leaderboard.followersCount
+      const normalize = getNormalizeMultiplier(leaderboard.followersCount);
+
+      const orderPointsToReverse = sareeBoughtCount * 10 * normalize;
+
+      const premiumPointsToReverse = getPremiumPoints(
+        leaderboard.followersCount,
       );
-
-      const orderPointsToReverse =
-        sareeBoughtCount * 10 * normalize;
-
-      const premiumPointsToReverse =
-        getPremiumPoints(leaderboard.followersCount);
 
       // Reverse safely (never go negative)
       leaderboard.orderPoints = Math.max(
         0,
-        leaderboard.orderPoints - orderPointsToReverse
+        leaderboard.orderPoints - orderPointsToReverse,
       );
 
       leaderboard.premiumPoints = Math.max(
         0,
-        leaderboard.premiumPoints - premiumPointsToReverse
+        leaderboard.premiumPoints - premiumPointsToReverse,
       );
 
       leaderboard.consistencyPoints = Math.max(
         0,
-        leaderboard.consistencyPoints - 5
+        leaderboard.consistencyPoints - 5,
       );
 
       leaderboard.totalPoints =
@@ -400,7 +413,6 @@ exports.deletePurchaseByUsername = async (req, res) => {
     return res.status(200).json({
       message: "Purchase deleted & leaderboard rolled back",
     });
-
   } catch (err) {
     await session.abortTransaction();
     return res.status(500).json({
@@ -411,5 +423,3 @@ exports.deletePurchaseByUsername = async (req, res) => {
     session.endSession();
   }
 };
-
-
