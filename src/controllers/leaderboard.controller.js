@@ -4,7 +4,7 @@ const Leaderboard = require("../models/LeaderBoard");
 const LeaderboardUser = require("../models/LeaderboardUser");
 const PromoCode = require("../models/PromoCode");
 const InstagramPurchase = require("../models/InstagramPurchase");
-
+const { getPremiumPoints } = require("../utils/leaderboardPoints");
 const mongoose = require("mongoose");
 
 /* ==============================
@@ -35,6 +35,7 @@ exports.getUsersForAdmin = async (req, res) => {
 
     const response = users.map(u => ({
       instagramUsername: u.instagramUsername,
+      email: u.email,
       followersCount: u.followersCount,
       orderPoints: u.orderPoints,
       premiumPoints: u.premiumPoints,
@@ -111,9 +112,10 @@ exports.getUsers = async (req, res) => {
    Single leaderboard user
 ================================ */
 exports.getUserByUsername = async (req, res) => {
-  try {    
+  try {
     const { instagramUsername } = req.user;
 
+    /* ---------- FETCH USER ---------- */
     const user = await Leaderboard.findOne({
       instagramUsername,
     }).lean();
@@ -124,6 +126,13 @@ exports.getUserByUsername = async (req, res) => {
       });
     }
 
+    /* ---------- CALCULATE RANK ---------- */
+    const higherRankCount = await Leaderboard.countDocuments({
+      totalPoints: { $gt: user.totalPoints },
+    });
+
+    const leaderboardPlace = higherRankCount + 1;
+
     return res.status(200).json({
       instagramUsername: user.instagramUsername,
       followersCount: user.followersCount,
@@ -131,7 +140,9 @@ exports.getUserByUsername = async (req, res) => {
       premiumPoints: user.premiumPoints,
       consistencyPoints: user.consistencyPoints,
       totalPoints: user.totalPoints,
+      leaderboardPlace,
     });
+
   } catch (error) {
     console.error(error);
     return res.status(500).json({
@@ -139,6 +150,7 @@ exports.getUserByUsername = async (req, res) => {
     });
   }
 };
+
 
 /* ==============================
    3️⃣ UPDATE /user/:instagramUsername
@@ -206,15 +218,10 @@ await resend.emails.send({
    4️⃣ UPDATE /admin/:instagramUsername
    Admin-approved followers update
 ================================ */
-exports.adminUpdateFollowers = async (req, res) => {
-  try {
-    const adminToken = req.headers["admin-token"];
 
-    if (adminToken !== process.env.ADMIN_TOKEN) {
-      return res.status(403).json({
-        message: "Invalid admin token",
-      });
-    }
+
+exports.adminUpdateFollowers = async (req, res) => {
+  try {    
 
     const { instagramUsername } = req.params;
     const { followers_count } = req.body;
@@ -229,23 +236,35 @@ exports.adminUpdateFollowers = async (req, res) => {
       });
     }
 
-    const updated = await Leaderboard.findOneAndUpdate(
-      { instagramUsername },
-      { $set: { followersCount: followers_count } },
-      { new: true }
-    );
+    /* ---------- FETCH EXISTING USER ---------- */
+    const leaderboard = await Leaderboard.findOne({
+      instagramUsername,
+    });
 
-    if (!updated) {
+    if (!leaderboard) {
       return res.status(404).json({
         message: "Leaderboard user not found",
       });
     }
 
+    /* ---------- RECALCULATE PREMIUM ---------- */
+    const newPremiumPoints = getPremiumPoints(followers_count);
+
+    leaderboard.followersCount = followers_count;
+    leaderboard.premiumPoints = newPremiumPoints;
+
+
+
+    await leaderboard.save();
+
     return res.status(200).json({
-      message: "Followers count updated successfully",
+      message: "Followers & premium points updated successfully",
       instagramUsername,
-      followersCount: followers_count,
+      followersCount: leaderboard.followersCount,
+      premiumPoints: leaderboard.premiumPoints,
+      totalPoints: leaderboard.totalPoints,
     });
+
   } catch (error) {
     console.error(error);
     return res.status(500).json({
@@ -253,6 +272,7 @@ exports.adminUpdateFollowers = async (req, res) => {
     });
   }
 };
+
 
 
 

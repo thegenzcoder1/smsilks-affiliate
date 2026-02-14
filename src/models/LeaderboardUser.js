@@ -12,6 +12,16 @@ const leaderboardUserSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+      email: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+      match: [
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+        "Invalid email format",
+      ],
+    }
 });
 
 module.exports = mongoose.model(

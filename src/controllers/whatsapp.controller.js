@@ -106,8 +106,12 @@ exports.sendEmailNotification = async (req, res) => {
       promoCode: normalizedPromoCode,
     });
 
-    if (!promo || promo.details.length === 0) {
+    if (!promo) {
       return res.status(404).json({ message: "Invalid PromoCode" });
+    }
+
+    if (promo.details.length === 0) {
+      return res.status(404).json({ message: "No Affiliate Present For This PromoCode" });
     }
 
     /* ---------- DUPLICATE CHECK ---------- */
@@ -219,43 +223,49 @@ exports.sendEmailNotification = async (req, res) => {
     );
 
     /* ---------- LEADERBOARD ---------- */
-    for (const affiliate of promo.details) {
-      const username = affiliate.affiliateInstagramUsername;
+  for (const affiliate of promo.details) {
+    const username = affiliate.affiliateInstagramUsername;
 
-      let leaderboard = await Leaderboard.findOne(
-        { instagramUsername: username },
-        null,
-        { session },
+    // Skip your own Instagram if required
+    if (username === process.env.MY_INSTAGRAM_USERNAME) continue;
+
+    // 🔎 STRICT: Must exist
+    const leaderboard = await Leaderboard.findOne(
+      { instagramUsername: username },
+      null,
+      { session }
+    );
+
+    if (!leaderboard) {
+      throw new Error(
+        `Leaderboard user not found for ${username}. Aborting transaction.`
       );
-
-      const followersCount = leaderboard?.followersCount ?? 0;
-      const normalize = getNormalizeMultiplier(followersCount);
-
-      const orderPointsEarned = sareeBoughtCount * 10 * normalize;
-
-      const premiumPointsEarned = getPremiumPoints(followersCount);
-
-      if (!leaderboard) {
-        leaderboard = new Leaderboard({
-          instagramUsername: username,
-          followersCount,
-          orderPoints: orderPointsEarned,
-          premiumPoints: premiumPointsEarned,
-          consistencyPoints: 5,
-        });
-      } else {
-        leaderboard.orderPoints += orderPointsEarned;
-        leaderboard.premiumPoints += premiumPointsEarned;
-        leaderboard.consistencyPoints += 5;
-      }
-
-      leaderboard.totalPoints =
-        leaderboard.orderPoints +
-        leaderboard.premiumPoints +
-        leaderboard.consistencyPoints;
-
-      await leaderboard.save({ session });
     }
+
+    // 🚫 DO NOT TOUCH followersCount
+    const followersCount = leaderboard.followersCount;
+
+    const normalize = getNormalizeMultiplier(followersCount);
+
+    const orderPointsEarned =
+      sareeBoughtCount * 10 * normalize;
+
+    const premiumPointsEarned =
+      getPremiumPoints(followersCount);
+
+    // ✅ Only update existing values
+    leaderboard.orderPoints += orderPointsEarned;
+    leaderboard.premiumPoints += premiumPointsEarned;
+    leaderboard.consistencyPoints += 25;
+
+    leaderboard.totalPoints =
+      leaderboard.orderPoints +
+      leaderboard.premiumPoints +
+      leaderboard.consistencyPoints;
+
+    await leaderboard.save({ session });
+  }
+
 
     await session.commitTransaction();
 

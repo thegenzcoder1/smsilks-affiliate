@@ -7,6 +7,8 @@ const adminMiddleware = require("../middleware/adminMiddleware");
 const {
   login,
   createUser,
+  updateUserPassword,
+  deleteUser
 } = require("../controllers/leaderboard.auth.controller");
 
 const {
@@ -27,6 +29,18 @@ router.post("/leaderboard/admin/create", adminMiddleware, createUser);
 router.get("/leaderboard/users", authMiddleware, getUsers);
 router.get("/leaderboard/user", authMiddleware, getUserByUsername);
 
+router.get(
+  "/leaderboard/admin/users",
+  adminMiddleware,
+  getUsersForAdmin
+);
+
+router.get(
+  "/leaderboard/user/purchases",
+  authMiddleware,
+  getAffiliatePurchaseHistory
+);
+
 router.patch(
   "/leaderboard/user/:instagramUsername",
   authMiddleware,
@@ -44,17 +58,14 @@ router.delete(
   adminDeleteLeaderboardUser
 );
 
-router.get(
-  "/leaderboard/admin/:instagramUsername",
-  adminMiddleware,
-  getUsersForAdmin
-)
+router.patch("/leaderboard/admin/user/:instagramUsername/password", adminMiddleware, updateUserPassword);
 
-router.get(
-  "/leaderboard/user/purchases",
-  authMiddleware,
-  getAffiliatePurchaseHistory
-);
+
+router.delete("/leaderboard/user/:instagramUsername", adminMiddleware, deleteUser);
+
+
+
+
 
 
 module.exports = router;

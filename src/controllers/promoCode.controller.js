@@ -2,6 +2,7 @@
 const PromoCode = require("../models/PromoCode");
 const mongoose = require("mongoose");
 const { Resend } = require("resend");
+const LeaderboardUser = require("../models/LeaderboardUser");
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 /**
@@ -78,6 +79,37 @@ exports.addEmailToPromoCode = async (req, res) => {
     affiliateInstagramUsername = affiliateInstagramUsername.trim();
 
     session.startTransaction();
+
+        /* ================================
+       1️⃣ CHECK LEADERBOARD USER EXISTS
+    ================================== */
+
+    const isOwner =
+      affiliateInstagramUsername ===
+      process.env.MY_INSTAGRAM_USERNAME?.toLowerCase();
+
+    if (!isOwner) {
+      const leaderboardUser = await LeaderboardUser.findOne(
+        {
+          instagramUsername: affiliateInstagramUsername,
+          email,
+        },
+        null,
+        { session }
+      );
+
+      if (!leaderboardUser) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          message:
+            "User not added yet in LeaderboardUser table. Please create leaderboard user first.",
+        });
+      }
+    }
+
+    /* ================================
+       2️⃣ FIND PROMO CODE
+    ================================== */
 
     const promo = await PromoCode.findOne(
       { promoCode },

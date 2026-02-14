@@ -3,6 +3,16 @@ const mongoose = require("mongoose");
 
 const leaderboardSchema = new mongoose.Schema(
   {
+    email: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+      match: [
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+        "Invalid email format",
+      ],
+    },
     instagramUsername: {
       type: String,
       required: true,
