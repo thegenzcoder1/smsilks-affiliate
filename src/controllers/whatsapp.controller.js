@@ -255,7 +255,7 @@ exports.sendEmailNotification = async (req, res) => {
 
     // ✅ Only update existing values
     leaderboard.orderPoints += orderPointsEarned;
-    leaderboard.premiumPoints += premiumPointsEarned;
+    leaderboard.premiumPoints = premiumPointsEarned;
     leaderboard.consistencyPoints += 25;
 
     leaderboard.totalPoints =
