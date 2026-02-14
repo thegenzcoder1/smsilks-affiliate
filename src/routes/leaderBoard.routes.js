@@ -55,13 +55,13 @@ router.patch(
 router.delete(
   "/leaderboard/admin/:instagramUsername",
   adminMiddleware,
-  adminDeleteLeaderboardUser
+  deleteUser
 );
 
 router.patch("/leaderboard/admin/user/:instagramUsername/password", adminMiddleware, updateUserPassword);
 
 
-router.delete("/leaderboard/user/:instagramUsername", adminMiddleware, deleteUser);
+// router.delete("/leaderboard/user/:instagramUsername", adminMiddleware, deleteUser);
 
 
 

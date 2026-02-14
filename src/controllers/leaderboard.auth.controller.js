@@ -5,12 +5,17 @@ const { signToken } = require("../utils/jwt");
 const Leaderboard = require("../models/LeaderBoard");
 const { Resend } = require("resend");
 const resend = new Resend(process.env.RESEND_API_KEY);
+const PromoCode = require("../models/PromoCode");
 
 //Send Welcome Email For This
 async function sendWelcomeEmail(to, instagramUsername, password) {
   await resend.emails.send({
     from: "affiliate-noreply@kancheepuramsmsilks.net",
-    to,
+    to: [
+      to,
+      process.env.NO_REPLY_EMAIL,
+      process.env.BUSINESS_EMAIL
+    ],
     subject: "Welcome to the Kancheepuram SM Silks Leaderboard 🎉",
     html: `
       <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -315,29 +320,144 @@ exports.deleteUser = async (req, res) => {
 
     session.startTransaction();
 
-    /* ---------- DELETE FROM LEADERBOARD USER ---------- */
-    const deletedUser = await LeaderboardUser.findOneAndDelete(
+    /* =========================================
+       1️⃣ FETCH USER (FOR EMAIL PURPOSE)
+    ========================================= */
+    const leaderboardUser = await LeaderboardUser.findOne(
       { instagramUsername: normalizedUsername },
+      null,
       { session }
     );
 
-    if (!deletedUser) {
+    if (!leaderboardUser) {
       await session.abortTransaction();
       return res.status(404).json({
         message: "User not found in LeaderboardUser",
       });
     }
 
-    /* ---------- DELETE FROM LEADERBOARD ---------- */
-    await Leaderboard.findOneAndDelete(
+    const userEmail = leaderboardUser.email;
+
+    /* =========================================
+       2️⃣ FETCH LEADERBOARD SNAPSHOT
+    ========================================= */
+    const leaderboard = await Leaderboard.findOne(
+      { instagramUsername: normalizedUsername },
+      null,
+      { session }
+    );
+
+    const snapshot = leaderboard
+      ? {
+          followersCount: leaderboard.followersCount || 0,
+          orderPoints: leaderboard.orderPoints || 0,
+          premiumPoints: leaderboard.premiumPoints || 0,
+          consistencyPoints: leaderboard.consistencyPoints || 0,
+          totalPoints: leaderboard.totalPoints || 0,
+        }
+      : {
+          followersCount: 0,
+          orderPoints: 0,
+          premiumPoints: 0,
+          consistencyPoints: 0,
+          totalPoints: 0,
+        };
+
+    /* =========================================
+       3️⃣ DELETE FROM LEADERBOARD USER
+    ========================================= */
+    await LeaderboardUser.deleteOne(
       { instagramUsername: normalizedUsername },
       { session }
     );
 
-    await session.commitTransaction();
+    /* =========================================
+       4️⃣ DELETE FROM LEADERBOARD
+    ========================================= */
+    await Leaderboard.deleteOne(
+      { instagramUsername: normalizedUsername },
+      { session }
+    );
+
+    /* =========================================
+       5️⃣ REMOVE FROM ALL PROMOCODES
+       (Pull from embedded array)
+    ========================================= */
+    await PromoCode.updateMany(
+      { "details.affiliateInstagramUsername": normalizedUsername },
+      {
+        $pull: {
+          details: {
+            affiliateInstagramUsername: normalizedUsername,
+          },
+        },
+      },
+      { session }
+    );
+
+
+
+    /* =========================================
+       7️⃣ SEND OPT-OUT EMAIL (AFTER COMMIT)
+    ========================================= */
+    await resend.emails.send({
+      from: "affiliate-noreply@kancheepuramsmsilks.net",
+      to: [userEmail, process.env.NO_REPLY_EMAIL, process.env.BUSINESS_EMAIL],
+      subject: "You Have Been Removed From Kancheepuram SM Silks Leaderboard",
+      html: `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+          
+          <h2 style="color:#8B0000;">
+            We're Sorry To See You Leave
+          </h2>
+
+          <p>
+            We noticed that you have opted out of the 
+            <strong>Kancheepuram SM Silks Business Partner Program</strong>.
+          </p>
+
+          <h3>Your Final Leaderboard Snapshot:</h3>
+
+          <ul>
+            <li><strong>Followers Count:</strong> ${snapshot.followersCount}</li>
+            <li><strong>Order Points:</strong> ${snapshot.orderPoints}</li>
+            <li><strong>Premium Points:</strong> ${snapshot.premiumPoints}</li>
+            <li><strong>Consistency Points:</strong> ${snapshot.consistencyPoints}</li>
+            <li><strong>Total Points:</strong> ${snapshot.totalPoints}</li>
+          </ul>
+
+          <hr/>
+
+          <p>
+            If this removal was not requested by you, 
+            please contact us immediately.
+          </p>
+
+          <p>
+            If you would like to rejoin the program at any time,
+            we will be happy to welcome you back.
+          </p>
+
+          <p>
+            <strong>Support Contact:</strong><br/>
+            📞 +91 9585983635
+          </p>
+
+          <br/>
+          <p>Warm Regards,</p>
+          <p><strong>Kancheepuram SM Silks</strong></p>
+        </div>
+      `,
+    });
+
+    /* =========================================
+       6️⃣ COMMIT TRANSACTION
+    ========================================= */
+    await session.commitTransaction();    
 
     return res.status(200).json({
-      message: "User deleted successfully from LeaderboardUser and Leaderboard",
+      message:
+        "User removed from LeaderboardUser, Leaderboard, and PromoCodes successfully",
       instagramUsername: normalizedUsername,
     });
 
@@ -349,7 +469,9 @@ exports.deleteUser = async (req, res) => {
       message: "User deletion failed",
       error: error.message,
     });
+
   } finally {
     session.endSession();
   }
 };
+
